@@ -1,0 +1,126 @@
+---
+- name: Set up Fuse System Properties
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/system.properties"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'system.properties.j2'
+
+- name: Set up Apache Karaf's JMX Management
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/org.apache.karaf.management.cfg"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'org.apache.karaf.management.cfg.j2'
+
+- name: Set up Apache Karaf's ssh shell.
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/org.apache.karaf.shell.cfg"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'org.apache.karaf.shell.cfg.j2'
+
+- name: Set up Jetty Web Server
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/org.ops4j.pax.web.cfg"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'org.ops4j.pax.web.cfg.j2'
+
+- name: Reset Fuse Type
+  set_fact:
+    esb_type: 'full'
+  when: (esb_type is undefined)
+
+- name: Set up Karaf's Features
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/org.apache.karaf.features.cfg"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - "org.apache.karaf.features-{{ esb_type | default('full') }}.cfg.j2"
+
+- name: Define Maven Repository
+  set_fact:
+    maven_repository_manager_item: |
+      {{ maven_repository_manager }}@snapshots@id=esb-maven, \
+  when: (maven_repository_manager is defined)
+
+- name: Set up Fabric Maven Agent
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/io.fabric8.maven.cfg"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'io.fabric8.maven.cfg.j2'
+
+- name: Set up OPS4J maven Agent
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/org.ops4j.pax.url.mvn.cfg"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'org.ops4j.pax.url.mvn.cfg.j2'
+
+- name: Set up A-MQ server broker configuration
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/io.fabric8.mq.fabric.server-broker.cfg"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'io.fabric8.mq.fabric.server-broker.cfg.j2'
+
+- name: Defining Network of Brokers configuration
+  set_fact:
+    nob_discovery_uri: |
+      discoveryUri="multicast://{{ nob_multicast_name }}"
+    nob_connector_uri: |
+      <networkConnector uri="multicast://{{ nob_multicast_name }}" userName="{{ fuse_users.amq.username }}" password="{{ fuse_users.amq.password }}" />
+    nob_defined: true
+  when: (nob is defined and nob == "true")
+
+- name: Unsetting Network of Brokers configuration
+  set_fact:
+    nob_discovery_uri: ""
+    nob_connector_uri: ""
+    nob_defined: false
+  when: (nob is undefined) or (nob is defined and nob == "false")
+
+- name: Set up A-MQ Broker
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/activemq.xml"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'activemq.xml.j2'
+
+- name: Set up Custom Properties
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/custom.properties"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'custom.properties.j2'
+
+- name: Create Fuse Users
+  become_user: "{{ user['name'] }}"
+  lineinfile:
+    dest: "{{ fuse_home }}/etc/users.properties"
+    regexp: "^(#?){{ item.value.username }}=(.*)$"
+    line: "{{ item.value.username ~ '=' ~ item.value.password ~ ',' ~ item.value.roles | join(',') }}"
+    insertbefore: EOF
+  with_dict: "{{ fuse_users }}"

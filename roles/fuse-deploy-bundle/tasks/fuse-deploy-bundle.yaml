@@ -1,0 +1,71 @@
+---
+- name: Download Application from Maven Repository SNAPSHOT
+  become_user: "{{ user['name'] }}"
+  maven_artifact:
+    group_id: '{{ item.groupId }}'
+    artifact_id: '{{ item.artifactId }}'
+    version: '{{ item.version }}'
+    repository_url: "{{ maven_repository | selectattr('extra', 'equalto', '@snapshots')| map(attribute='url') | list | first }}"
+    dest: '{{ app_home }}/'
+  with_items: '{{ applications }}'
+  when: applications is defined and ( item['version'].find('SNAPSHOT') != -1 )
+
+- name: Download Application from Maven Repository
+  become_user: "{{ user['name'] }}"
+  maven_artifact:
+    group_id: '{{ item.groupId }}'
+    artifact_id: '{{ item.artifactId }}'
+    version: '{{ item.version }}'
+    repository_url: "{{ maven_repository | selectattr('extra', 'equalto', '')| map(attribute='url') | list | first  }}"
+    dest: '{{ app_home }}/'
+  with_items: '{{ applications }}'
+  when: applications is defined and ( item['version'].find('SNAPSHOT') == -1 )
+
+- name: Create Applications Config in {{ fuse_home }}/etc folder
+  become_user: "{{ user['name'] }}"
+  template:
+    src: "{{ item }}"
+    dest: "{{ fuse_home }}/etc/com.redhat.camel.environment.cfg"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items:
+    - 'com.redhat.camel.environment.cfg.j2'
+
+- name: Install Applications in {{ fuse_home }}/deploy folder
+  become_user: "{{ user['name'] }}"
+  copy:
+    src: "{{ app_home }}/{{ item.artifactId }}-{{ item.version }}.jar"
+    remote_src: True
+    dest: "{{ fuse_home }}/deploy"
+    owner: "{{ user['name'] }}"
+    group: "{{ user['name'] }}"
+  with_items: '{{ applications }}'
+  notify:
+    - restart fuse-{{ esb_name }}
+  when: applications is defined and
+        (deploy_applications is defined and deploy_applications == 'yes')
+
+- name: Install Feature Repositories in {{ esb_name }}
+  become_user: "{{ user['name'] }}"
+  command: "{{ fuse_client}} 'features:addurl mvn:{{ item.groupId }}/{{ item.artifactId }}/{{ item.version }}/xml/features'"
+  with_items: '{{ features }}'
+  when: features is defined and
+        (deploy_features is defined and deploy_features == 'yes')
+
+- name: Install Features in {{ esb_name }}
+  become_user: "{{ user['name'] }}"
+  command: "{{ fuse_client}} 'features:install {{ item.name }}'"
+  with_items: '{{ features }}'
+  notify:
+    - restart fuse-{{ esb_name }}
+  when: features is defined and
+        (deploy_features is defined and deploy_features == 'yes')
+
+- name: Install Bundles in {{ esb_name }}
+  become_user: "{{ user['name'] }}"
+  command: "{{ fuse_client}} 'osgi:install -s mvn:{{ item.groupId }}/{{ item.artifactId }}/{{ item.version }}'"
+  with_items: '{{ bundles }}'
+  notify:
+    - restart fuse-{{ esb_name }}
+  when: bundles is defined and
+        (deploy_bundles is defined and deploy_bundles == 'yes')
